@@ -1,0 +1,53 @@
+.customized-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+
+    font-size: 1rem;
+    font-weight: bold;
+    color: var(--color-text);
+
+    height: 3.15em;
+    padding: 0.375em 1.5em;
+
+    border-radius: 999px;
+    corner-shape: superellipse(1.1);
+    border: 0;
+
+    box-shadow: 0px 0px 40px 13px var(--color-shadow);
+
+    background-color: var(--bg-color);
+    transform: scale(1);
+    filter: brightness(1);
+
+    transition:
+        transform 300ms cubic-bezier(0.5, 1.92, 0.64, 1),
+        background-color 500ms cubic-bezier(0.15, 0.82, 0.4, 0.99),
+        filter 500ms cubic-bezier(0.15, 0.82, 0.4, 0.99);
+}
+
+.customized-button.is-highlighted {
+    box-shadow:
+        inset 1.5px 1.5px 1px -1px var(--color-edge-highlight),
+        inset -1.5px -1.4px 1px -1px var(--color-edge-highlight),
+        inset 0px 0px 0px 0.5px var(--color-border),
+        0px 0px 40px 13px var(--color-shadow);
+}
+
+.customized-button:hover {
+    transform: scale(1.09);
+}
+
+.customized-button:active {
+    filter: brightness(1.2);
+    transform: scale(0.98);
+    background-color: color-mix(
+        in srgb,
+        var(--bg-color-pressed) 70%,
+        transparent
+    );
+}

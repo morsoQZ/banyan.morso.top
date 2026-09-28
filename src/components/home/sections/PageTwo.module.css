@@ -1,0 +1,30 @@
+.section {
+    display: grid;
+    place-items: center;
+    padding: calc(var(--topbar-height) + 4rem) var(--page-gutter);
+}
+
+.content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.content h2 {
+    font-size: clamp(2.5rem, 6vw, 6rem);
+    line-height: 1.15;
+
+    scroll-margin-top: calc(var(--topbar-height) + 2rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.content p {
+    color: var(--color-text-muted);
+    line-height: 2rem;
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

@@ -1,0 +1,36 @@
+.section {
+    display: grid;
+    place-items: center;
+    padding: calc(var(--topbar-height) + 4rem) var(--page-gutter);
+}
+
+.brand-text {
+    font-family: var(--font-brand), sans-serif;
+    font-size: clamp(1.5rem, 2vw, 2rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    padding-bottom: 1rem;
+}
+
+.content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.content h1 {
+    font-size: clamp(4rem, 8vw, 9rem);
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.content p {
+    color: var(--color-text-muted);
+    line-height: 2rem;
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

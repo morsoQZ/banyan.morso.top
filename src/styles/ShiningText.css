@@ -1,0 +1,16 @@
+.shining-text {
+    display: inline-block;
+    background: linear-gradient(
+        90deg,
+        var(--color-text) 35%,
+        #60cf6f 45%,
+        #60cf6f 55%,
+        var(--color-text) 65%
+    );
+    background-size: 300% 100%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+}
