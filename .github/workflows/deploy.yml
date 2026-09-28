@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+    push:
+        branches:
+            - master
+
+concurrency:
+    group: deploy-banyan
+    cancel-in-progress: true
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Configure SSH
+              run: |
+                  mkdir -p ~/.ssh
+                  chmod 700 ~/.ssh
+
+                  printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+                  chmod 600 ~/.ssh/id_ed25519
+
+                  printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+                  chmod 600 ~/.ssh/known_hosts
+
+            - name: Deploy
+              run: |
+                  ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" '
+                    set -e
+
+                    export PATH=/usr/local/bin:/usr/bin:/bin
+
+                    cd /srv/banyan.morso.top
+
+                    git pull --ff-only origin master
+                    npm ci
+                    npm run build
+
+                    sudo -n /usr/bin/systemctl restart banyan.service
+                  '
