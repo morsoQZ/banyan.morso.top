@@ -11,7 +11,16 @@ const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
 
 // 同一篇文章用于页面内容和 SEO 信息。
 async function requireArticle(params) {
-    const { slug } = await params;
+    const { slug: encodedSlug } = await params;
+
+    let slug;
+
+    try {
+        slug = decodeURIComponent(encodedSlug);
+    } catch {
+        notFound();
+    }
+
     const article = await getArticleBySlug(slug);
 
     if (!article) {
