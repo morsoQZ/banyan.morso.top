@@ -1,5 +1,5 @@
 .home > section {
-    min-height: 100dvh;
+    min-height: 100vh;
 }
 
 .home [data-reveal] {

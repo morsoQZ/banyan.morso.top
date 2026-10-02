@@ -4,39 +4,207 @@ on:
     push:
         branches:
             - master
+    workflow_dispatch:
+
+permissions:
+    contents: read
 
 concurrency:
     group: deploy-banyan
-    cancel-in-progress: true
+    # 不要在切换版本或回退期间取消正在运行的部署。
+    cancel-in-progress: false
 
 jobs:
     deploy:
+        if: github.ref == 'refs/heads/master'
         runs-on: ubuntu-latest
+        timeout-minutes: 45
 
         steps:
-            - name: Configure SSH
+            - name: Build and deploy frontend release
+              shell: bash
+              env:
+                  DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+                  DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+                  DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+                  DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+                  DEPLOY_REVISION: ${{ github.sha }}
+                  DEPLOY_REPOSITORY: ${{ github.repository }}
+                  DEPLOY_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
               run: |
-                  mkdir -p ~/.ssh
-                  chmod 700 ~/.ssh
+                  set -euo pipefail
 
-                  printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-                  chmod 600 ~/.ssh/id_ed25519
+                  : "${DEPLOY_SSH_KEY:?缺少 DEPLOY_SSH_KEY}"
+                  : "${DEPLOY_KNOWN_HOSTS:?缺少 DEPLOY_KNOWN_HOSTS}"
+                  : "${DEPLOY_USER:?缺少 DEPLOY_USER}"
+                  : "${DEPLOY_HOST:?缺少 DEPLOY_HOST}"
+                  [[ "$DEPLOY_REVISION" =~ ^[0-9a-f]{40}$ ]]
+                  [[ "$DEPLOY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+                  [[ "$DEPLOY_RUN" =~ ^[0-9]+-[0-9]+$ ]]
 
-                  printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-                  chmod 600 ~/.ssh/known_hosts
+                  umask 077
+                  ssh_directory=$(mktemp -d "$RUNNER_TEMP/banyan-ssh.XXXXXX")
+                  cleanup_ssh() {
+                    rm -f -- "$ssh_directory/id_ed25519" "$ssh_directory/known_hosts"
+                    rmdir -- "$ssh_directory"
+                  }
+                  trap cleanup_ssh EXIT
+                  printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_directory/id_ed25519"
+                  printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_directory/known_hosts"
 
-            - name: Deploy
-              run: |
-                  ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" '
-                    set -e
+                  ssh \
+                    -i "$ssh_directory/id_ed25519" \
+                    -o IdentitiesOnly=yes \
+                    -o BatchMode=yes \
+                    -o StrictHostKeyChecking=yes \
+                    -o UserKnownHostsFile="$ssh_directory/known_hosts" \
+                    -o ConnectTimeout=15 \
+                    -o ServerAliveInterval=30 \
+                    -o ServerAliveCountMax=3 \
+                    "$DEPLOY_USER@$DEPLOY_HOST" \
+                    bash -s -- "$DEPLOY_REVISION" "$DEPLOY_REPOSITORY" "$DEPLOY_RUN" <<'REMOTE'
+                  set -Eeuo pipefail
+                  export PATH=/usr/local/bin:/usr/bin:/bin
+                  export GIT_TERMINAL_PROMPT=0
+                  umask 022
 
-                    export PATH=/usr/local/bin:/usr/bin:/bin
+                  revision=$1
+                  repository=$2
+                  deployment=$3
+                  [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+                  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+                  [[ "$deployment" =~ ^[0-9]+-[0-9]+$ ]]
 
-                    cd /srv/banyan.morso.top
+                  deploy_root=/srv/banyan-frontend
+                  git_repository="$deploy_root/repository.git"
+                  repository_url="https://github.com/$repository.git"
+                  release="$deploy_root/releases/$revision-$deployment"
+                  next_link="$deploy_root/.current-$deployment"
+                  rollback_link="$deploy_root/.rollback-$deployment"
+                  service=banyan.service
+                  export CMS_API_BASE_URL=http://127.0.0.1:8000/api/v2/
 
-                    git pull --ff-only origin master
-                    npm ci
-                    npm run build
+                  # 目录、服务入口和 sudo 权限由管理员一次性配置，工作流不修改系统服务。
+                  if [[ ! -d "$deploy_root/releases" || ! -w "$deploy_root" || ! -w "$deploy_root/releases" ]]; then
+                    echo '请先创建 /srv/banyan-frontend/releases，并授权部署账户写入。' >&2
+                    exit 1
+                  fi
+                  exec 9>"$deploy_root/deploy.lock"
+                  flock --wait 600 9
 
-                    sudo -n /usr/bin/systemctl restart banyan.service
-                  '
+                  working_directory=$(systemctl show "$service" -p WorkingDirectory --value)
+                  if [[ "$working_directory" != "$deploy_root/current" ]]; then
+                    echo '请先将 banyan.service 的 WorkingDirectory 设置为 /srv/banyan-frontend/current。' >&2
+                    exit 1
+                  fi
+                  if [[ ! -L "$deploy_root/current" ]]; then
+                    echo '请先创建 current 符号链接；首次可指向 /srv/banyan.morso.top，保留旧站点供回退。' >&2
+                    exit 1
+                  fi
+                  previous_release=$(readlink -f "$deploy_root/current")
+                  test -f "$previous_release/.next/BUILD_ID"
+                  sudo -n -l /usr/bin/systemctl restart "$service" >/dev/null
+
+                  switched=0
+                  rollback_and_exit() {
+                    local exit_status=$1
+                    trap - ERR HUP INT TERM
+                    set +e
+                    if [[ "$switched" == 1 ]]; then
+                      echo "部署失败，尝试恢复旧版本：$previous_release" >&2
+                      if ln -sT "$previous_release" "$rollback_link" &&
+                        mv -Tf "$rollback_link" "$deploy_root/current" &&
+                        sudo -n /usr/bin/systemctl restart "$service"; then
+                        echo '已恢复旧版本入口并重新启动前端；请查看日志确认运行状态。' >&2
+                      else
+                        echo '自动回退失败，需要管理员检查 current 链接及 banyan.service。' >&2
+                      fi
+                    fi
+                    exit "$exit_status"
+                  }
+                  trap 'rollback_and_exit $?' ERR
+                  trap 'rollback_and_exit 130' INT
+                  trap 'rollback_and_exit 143' HUP TERM
+
+                  # 获取本次触发对应的确切提交，不会在部署期间追踪变化中的 master。
+                  if [[ ! -d "$git_repository" ]]; then
+                    git clone --bare "$repository_url" "$git_repository" </dev/null
+                  fi
+                  if [[ "$(git -C "$git_repository" config --get remote.origin.url)" != "$repository_url" ]]; then
+                    echo '发布仓库的 origin 与当前 GitHub 仓库不一致，停止部署。' >&2
+                    exit 1
+                  fi
+                  git -C "$git_repository" fetch origin "$revision" </dev/null
+                  git -C "$git_repository" cat-file -e "$revision^{commit}"
+                  mkdir "$release"
+                  git -C "$git_repository" archive --format=tar "$revision" |
+                    tar -x -C "$release"
+                  cd "$release"
+
+                  # 先检查文章 API；有已发布文章时，将其详情也纳入上线检查。
+                  article_path=$(node <<'NODE'
+                  (async () => {
+                    const response = await fetch(`${process.env.CMS_API_BASE_URL}articles/?limit=1`, {
+                      headers: { Accept: 'application/json' },
+                      signal: AbortSignal.timeout(10000),
+                    });
+                    if (!response.ok) throw new Error(`文章 API 返回 HTTP ${response.status}`);
+                    const data = await response.json();
+                    if (!Array.isArray(data.items) || !Number.isSafeInteger(data.meta?.total_count)) {
+                      throw new Error('文章 API 返回的数据格式不正确');
+                    }
+                    if (data.items.length) {
+                      const slug = data.items[0].meta?.slug;
+                      if (typeof slug !== 'string' || !slug) throw new Error('文章缺少有效 slug');
+                      process.stdout.write(`/articles/${encodeURIComponent(slug)}`);
+                    }
+                  })().catch(error => {
+                    console.error(error);
+                    process.exit(1);
+                  });
+                  NODE
+                  )
+
+                  npm ci </dev/null
+                  npm run build </dev/null
+                  node <<'NODE'
+                  const pages = require('./.next/server/app-paths-manifest.json');
+                  for (const route of ['/articles/page', '/articles/[slug]/page']) {
+                    if (!pages[route]) throw new Error(`构建缺少页面：${route}`);
+                  }
+                  console.log('构建检查通过：文章列表和详情页面均存在');
+                  NODE
+
+                  # 只切换链接，保留旧版本及所有失败构建；不自动删除代码或用户数据。
+                  ln -sT "$release" "$next_link"
+                  switched=1
+                  mv -Tf "$next_link" "$deploy_root/current"
+                  sudo -n /usr/bin/systemctl restart "$service"
+
+                  http_ok() {
+                    local status
+                    status=$(curl --silent --show-error --max-time 10 \
+                      --output /dev/null --write-out '%{http_code}' "$1") || return 1
+                    [[ "$status" == 200 ]]
+                  }
+
+                  healthy=0
+                  for health_attempt in {1..15}; do
+                    if systemctl is-active --quiet "$service" &&
+                      http_ok http://127.0.0.1:3001/ &&
+                      http_ok http://127.0.0.1:3001/articles &&
+                      { [[ -z "$article_path" ]] || http_ok "http://127.0.0.1:3001$article_path"; }; then
+                      healthy=1
+                      break
+                    fi
+                    sleep 2
+                  done
+                  if [[ "$healthy" != 1 ]]; then
+                    echo '前端上线检查失败，将回退旧版本。' >&2
+                    rollback_and_exit 1
+                  fi
+
+                  switched=0
+                  trap - ERR HUP INT TERM
+                  printf '部署成功：%s\n发布目录：%s\n' "$revision" "$release"
+                  REMOTE

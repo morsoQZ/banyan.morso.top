@@ -6,7 +6,6 @@ export default function PageOne() {
     return (
         <section className={styles.section}>
             <div className={styles.content}>
-                <h1>古榕档案</h1>
                 <div className={styles["brand-text"]}>
                     <span style={{ color: "#60cf6f" }}>banyan</span>
                     <ShiningText>{".morso.top"}</ShiningText>
@@ -18,9 +17,7 @@ export default function PageOne() {
                 <p>发现更多来自古榕树下的声音</p>
             </div>
             <div>
-                <Button href="#page-two-title" is-highlighted>
-                    向下探索
-                </Button>
+                <Button href="#page-two-title">向下探索</Button>
             </div>
         </section>
     );
