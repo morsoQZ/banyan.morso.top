@@ -1,5 +1,6 @@
 const navigationItems = [
     { id: "home", label: "首页", href: "/" },
+    { id: "articles", label: "文章", href: "/articles" },
     {
         id: "about",
         label: "关于本站",

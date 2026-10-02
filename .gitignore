@@ -11,13 +11,23 @@
 # misc
 .DS_Store
 *.pem
+tempfolder
 
 # debug
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
 .env*
 backend/.venv/
+
+# CMS 上传文件和收集后的静态资源
+/backend/cms/media/
+/backend/cms/staticfiles/
+
+# Python 自动生成的缓存
+__pycache__/
+*.py[cod]
+
+# 本地 SQLite 数据库，不作为生产数据库
+*.sqlite3
+*.sqlite3-journal
